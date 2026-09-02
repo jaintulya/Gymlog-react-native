@@ -1,33 +1,80 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+      screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
+
+        tabBarStyle: {
+          backgroundColor: '#0A0A0A',
+          borderTopColor: '#252525',
+          height: 65,
+          paddingTop: 5,
+          paddingBottom: 5,
+        },
+
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: '#666666',
+
+        tabBarIcon: ({ color, size }) => {
+          let iconName: keyof typeof Ionicons.glyphMap;
+
+          if (route.name === 'index') {
+            iconName = 'home';
+          } else if (route.name === 'workout') {
+            iconName = 'barbell';
+          } else if (route.name === 'history') {
+            iconName = 'time';
+          } else if (route.name === 'progress') {
+            iconName = 'stats-chart';
+          } else {
+            iconName = 'settings';
+          }
+
+          return (
+            <Ionicons
+              name={iconName}
+              size={size}
+              color={color}
+            />
+          );
+        },
+      })}
+    >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
         }}
       />
+
       <Tabs.Screen
-        name="explore"
+        name="workout"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Workout',
+        }}
+      />
+
+      <Tabs.Screen
+        name="history"
+        options={{
+          title: 'History',
+        }}
+      />
+
+      <Tabs.Screen
+        name="progress"
+        options={{
+          title: 'Progress',
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
         }}
       />
     </Tabs>
