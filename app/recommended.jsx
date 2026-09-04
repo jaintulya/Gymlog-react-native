@@ -1,13 +1,21 @@
 import { ScrollView, View, Text, Pressable, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
-import { recommendedWeeklySplit } from '../utils/workout';
+import { recommendedSplits } from '../utils/workout';
 
-const muscleMap = {
-  Push: 'Chest • Shoulders • Triceps',
-  Pull: 'Back • Biceps',
-  Legs: 'Quads • Hamstrings • Glutes • Calves',
-  Rest: 'Recovery',
+const splitIcons = {
+  ppl: 'barbell-outline',
+  upperlower: 'body-outline',
+  fullbody: 'fitness-outline',
+  brosplit: 'calendar-outline',
+};
+
+const splitMuscles = {
+  ppl: ['Chest', 'Shoulders', 'Triceps', 'Back', 'Biceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves'],
+  upperlower: ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves'],
+  fullbody: ['Chest', 'Back', 'Quads', 'Shoulders', 'Hamstrings', 'Biceps', 'Triceps', 'Calves'],
+  brosplit: ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs'],
 };
 
 export default function RecommendedScreen() {
@@ -17,59 +25,59 @@ export default function RecommendedScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
+      {/* HEADER */}
       <View style={styles.headerRow}>
         <Pressable
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
         </Pressable>
 
         <View>
-          <Text style={styles.title}>Recommended Plan</Text>
-          <Text style={styles.subtitle}>Your weekly workout split</Text>
+          <Text style={styles.title}>Recommended</Text>
+          <Text style={styles.subtitle}>Choose your weekly split</Text>
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>WEEKLY PLAN</Text>
-
-      {recommendedWeeklySplit.map(day => {
-        const isRest = !day.workoutId;
+      {/* SPLIT CARDS */}
+      {Object.values(recommendedSplits).map(split => {
+        const muscles = splitMuscles[split.id] || [];
+        const muscleText = muscles.slice(0, 6).join(' · ') + (muscles.length > 6 ? ' ...' : '');
 
         return (
           <Pressable
-            key={day.day}
-            style={styles.dayCard}
+            key={split.id}
+            style={styles.splitCard}
             onPress={() =>
               router.push({
-                pathname: '/day-workout',
+                pathname: '/weekly-workout',
                 params: {
-                  workoutId: day.workoutId || '',
-                  day: day.day,
-                  workoutName: day.name,
+                  splitId: split.id,
                 },
               })
             }
           >
-            <View style={styles.dayCircle}>
-              <Text style={styles.dayCircleText}>
-                {day.day.substring(0, 1)}
-              </Text>
+            <View style={styles.splitIconWrap}>
+              <Ionicons
+                name={splitIcons[split.id] || 'barbell-outline'}
+                size={22}
+                color="#FFFFFF"
+              />
             </View>
 
-            <View style={styles.dayInfo}>
-              <Text style={styles.dayName}>{day.day}</Text>
-
-              <Text style={styles.workoutName}>
-                {day.name}
-              </Text>
-
-              <Text style={styles.muscles}>
-                {muscleMap[day.name] || 'Workout'}
-              </Text>
+            <View style={styles.splitInfo}>
+              <Text style={styles.splitName}>{split.name.toUpperCase()}</Text>
+              <Text style={styles.splitDesc}>{split.description}</Text>
+              <View style={styles.splitMeta}>
+                <View style={styles.splitDaysBadge}>
+                  <Text style={styles.splitDaysText}>{split.days} DAYS</Text>
+                </View>
+                <Text style={styles.splitMuscles}>{muscleText}</Text>
+              </View>
             </View>
 
-            <Text style={styles.arrow}>→</Text>
+            <Ionicons name="chevron-forward" size={18} color="#333333" />
           </Pressable>
         );
       })}
@@ -82,105 +90,98 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0A0A0A',
   },
-
   content: {
     padding: 20,
     paddingTop: 55,
     paddingBottom: 60,
   },
-
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 28,
   },
-
   backButton: {
     width: 42,
     height: 42,
     borderRadius: 12,
     backgroundColor: '#151515',
-    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#252525',
     justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
-
-  backText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-  },
-
   title: {
     color: '#FFFFFF',
     fontSize: 27,
     fontWeight: '700',
   },
-
   subtitle: {
     color: '#777777',
     fontSize: 14,
     marginTop: 4,
   },
-
-  sectionTitle: {
-    color: '#666666',
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 12,
-  },
-
-  dayCard: {
+  splitCard: {
     backgroundColor: '#151515',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 11,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: '#252525',
     flexDirection: 'row',
     alignItems: 'center',
   },
-
-  dayCircle: {
-    width: 45,
-    height: 45,
-    borderRadius: 23,
-    backgroundColor: '#252525',
-    alignItems: 'center',
+  splitIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    backgroundColor: '#1C1C1C',
+    borderWidth: 1,
+    borderColor: '#252525',
     justifyContent: 'center',
-    marginRight: 14,
+    alignItems: 'center',
+    marginRight: 16,
   },
-
-  dayCircleText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-
-  dayInfo: {
+  splitInfo: {
     flex: 1,
+    paddingRight: 12,
   },
-
-  dayName: {
+  splitName: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
-
-  workoutName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    marginTop: 3,
-  },
-
-  muscles: {
+  splitDesc: {
     color: '#666666',
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 5,
+    lineHeight: 18,
   },
-
-  arrow: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    marginLeft: 10,
+  splitMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  splitDaysBadge: {
+    backgroundColor: '#1C1C1C',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  splitDaysText: {
+    color: '#888888',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  splitMuscles: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '500',
+    flex: 1,
   },
 });

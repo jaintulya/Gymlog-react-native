@@ -6,8 +6,10 @@ import {
   Pressable,
   TextInput,
   StyleSheet,
+  Modal,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 import {
   recommendedWorkouts,
@@ -15,7 +17,7 @@ import {
 } from '../utils/workout';
 
 import { exercises } from '../utils/exercises';
-import { getData } from '../utils/storage';
+import { getData, saveData } from '../utils/storage';
 
 export default function ActiveWorkoutScreen() {
   const { workoutId } = useLocalSearchParams();
@@ -37,11 +39,12 @@ export default function ActiveWorkoutScreen() {
 
   const [isPaused, setIsPaused] = useState(false);
 
-  const [showExtraOptions, setShowExtraOptions] =
-    useState(false);
+  const [showExtraModal, setShowExtraModal] = useState(false);
 
   const [skippedExercises, setSkippedExercises] =
     useState([]);
+
+  const [isCustom, setIsCustom] = useState(false);
 
   /*
     LOAD WORKOUT
@@ -52,21 +55,74 @@ export default function ActiveWorkoutScreen() {
   }, [workoutId]);
 
   const loadWorkout = async () => {
-    const saved = await getData(
-      `editedWorkout_${workoutId}`
-    );
-
-    if (saved) {
-      setWorkout(saved);
+    // 1. Check edited recommended
+    const edited = await getData(`editedWorkout_${workoutId}`);
+    if (edited) {
+      setWorkout(edited);
+      setIsCustom(true);
       return;
     }
 
+    // 2. Check custom workout (saved individual)
+    const customSaved = await getData(`customWorkout_${workoutId}`);
+    if (customSaved) {
+      setWorkout(customSaved);
+      setIsCustom(true);
+      return;
+    }
+
+    // 3. Check custom workouts list
+    const customList = (await getData('customWorkouts')) || [];
+    const found = customList.find(w => w.id === workoutId);
+    if (found) {
+      setWorkout(found);
+      setIsCustom(true);
+      return;
+    }
+
+    // 4. Check pending custom workout
+    const pending = await getData('pendingCustomWorkout');
+    if (pending && pending.id === workoutId) {
+      setWorkout(pending);
+      setIsCustom(true);
+      return;
+    }
+
+    // 5. Recommended
     const original = Object.values(
       recommendedWorkouts
     ).find(item => item.id === workoutId);
 
-    setWorkout(original || null);
+    if (original) {
+      setWorkout(original);
+      setIsCustom(false);
+    } else {
+      setWorkout(null);
+    }
   };
+
+  /*
+    INITIALISE SETS — 3 normal sets per exercise on load
+  */
+
+  useEffect(() => {
+    if (!workout) return;
+
+    const initial = {};
+
+    workout.exercises.forEach(exercise => {
+      if (!setsData[exercise.id]) {
+        initial[exercise.id] = Array.from(
+          { length: exercise.sets },
+          () => createSet(0, 0)
+        );
+      }
+    });
+
+    if (Object.keys(initial).length > 0) {
+      setSetsData(prev => ({ ...prev, ...initial }));
+    }
+  }, [workout]);
 
   /*
     WORKOUT TIMER
@@ -176,14 +232,12 @@ export default function ActiveWorkoutScreen() {
   const completeSet = (setIndex, weight, reps) => {
     if (!weight || !reps || isPaused) return;
 
-    const existing =
-      currentSets[setIndex] || {};
+    const list = [...(setsData[currentExercise.id] || [])];
+
+    const existing = list[setIndex] || {};
 
     const completedSet = {
-      ...createSet(
-        Number(weight),
-        Number(reps)
-      ),
+      ...createSet(Number(weight), Number(reps)),
 
       exerciseId: currentExercise.exerciseId,
 
@@ -196,18 +250,12 @@ export default function ActiveWorkoutScreen() {
       restSeconds: restTime || currentExercise.rest,
     };
 
-    setSetsData(prev => {
-      const list = [
-        ...(prev[currentExercise.id] || []),
-      ];
+    list[setIndex] = completedSet;
 
-      list[setIndex] = completedSet;
-
-      return {
-        ...prev,
-        [currentExercise.id]: list,
-      };
-    });
+    setSetsData(prev => ({
+      ...prev,
+      [currentExercise.id]: list,
+    }));
 
     setRestTime(currentExercise.rest);
     setIsResting(true);
@@ -218,15 +266,11 @@ export default function ActiveWorkoutScreen() {
   */
 
   const addExtraSet = type => {
-    setShowExtraOptions(false);
+    setShowExtraModal(false);
 
-    const newSet = {
-      id: `${Date.now()}-${Math.random()}`,
-      weight: 0,
-      reps: 0,
-      completed: false,
-      setType: type,
-    };
+    const newSet = createSet(0, 0);
+
+    newSet.setType = type;
 
     setSetsData(prev => {
       const list = [
@@ -358,7 +402,7 @@ export default function ActiveWorkoutScreen() {
 
       skippedExercises,
 
-      isCustom: false,
+      isCustom,
 
       totalSets,
       totalReps,
@@ -386,7 +430,7 @@ export default function ActiveWorkoutScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </Pressable>
 
         <View style={styles.timerBox}>
@@ -526,21 +570,6 @@ export default function ActiveWorkoutScreen() {
         SETS
       </Text>
 
-      {currentSets.length === 0 &&
-        Array.from({
-          length: currentExercise.sets,
-        }).map((_, index) => {
-          return (
-            <SetRow
-              key={`planned-${index}`}
-              index={index}
-              setData={null}
-              disabled={isPaused}
-              onDone={completeSet}
-            />
-          );
-        })}
-
       {currentSets.map((set, index) => (
         <SetRow
           key={set.id}
@@ -555,65 +584,87 @@ export default function ActiveWorkoutScreen() {
 
       <Pressable
         style={styles.extraButton}
-        onPress={() =>
-          setShowExtraOptions(
-            prev => !prev
-          )
-        }
+        onPress={() => setShowExtraModal(true)}
       >
+        <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
         <Text style={styles.extraText}>
-          + ADD EXTRA SET
+          ADD EXTRA SET
         </Text>
       </Pressable>
 
-      {showExtraOptions && (
-        <View style={styles.extraOptions}>
-          <Pressable
-            style={styles.extraOption}
-            onPress={() =>
-              addExtraSet('warmup')
-            }
-          >
-            <Text style={styles.extraOptionTitle}>
-              WARM-UP SET
-            </Text>
+      {/* EXTRA SET MODAL */}
 
-            <Text style={styles.extraOptionSub}>
-              Added at the beginning
-            </Text>
-          </Pressable>
+      <Modal
+        visible={showExtraModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowExtraModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowExtraModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Extra Set</Text>
+              <Pressable
+                style={styles.modalClose}
+                onPress={() => setShowExtraModal(false)}
+              >
+                <Ionicons name="close" size={22} color="#888888" />
+              </Pressable>
+            </View>
 
-          <Pressable
-            style={styles.extraOption}
-            onPress={() =>
-              addExtraSet('normal')
-            }
-          >
-            <Text style={styles.extraOptionTitle}>
-              NORMAL SET
-            </Text>
+            <Pressable
+              style={styles.modalOption}
+              onPress={() => addExtraSet('warmup')}
+            >
+              <View style={styles.modalOptionIcon}>
+                <Ionicons name="flame-outline" size={22} color="#888888" />
+              </View>
+              <View style={styles.modalOptionText}>
+                <Text style={styles.modalOptionTitle}>Warm-up Set</Text>
+                <Text style={styles.modalOptionSub}>
+                  Insert at the beginning
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#333333" />
+            </Pressable>
 
-            <Text style={styles.extraOptionSub}>
-              Added before drop sets
-            </Text>
-          </Pressable>
+            <Pressable
+              style={styles.modalOption}
+              onPress={() => addExtraSet('normal')}
+            >
+              <View style={styles.modalOptionIcon}>
+                <Ionicons name="barbell-outline" size={22} color="#888888" />
+              </View>
+              <View style={styles.modalOptionText}>
+                <Text style={styles.modalOptionTitle}>Normal Set</Text>
+                <Text style={styles.modalOptionSub}>
+                  Insert before drop sets
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#333333" />
+            </Pressable>
 
-          <Pressable
-            style={styles.extraOption}
-            onPress={() =>
-              addExtraSet('drop')
-            }
-          >
-            <Text style={styles.extraOptionTitle}>
-              DROP SET
-            </Text>
-
-            <Text style={styles.extraOptionSub}>
-              Added at the end
-            </Text>
-          </Pressable>
-        </View>
-      )}
+            <Pressable
+              style={styles.modalOption}
+              onPress={() => addExtraSet('drop')}
+            >
+              <View style={styles.modalOptionIcon}>
+                <Ionicons name="trending-down-outline" size={22} color="#888888" />
+              </View>
+              <View style={styles.modalOptionText}>
+                <Text style={styles.modalOptionTitle}>Drop Set</Text>
+                <Text style={styles.modalOptionSub}>
+                  Insert at the end
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#333333" />
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* NAVIGATION */}
 
@@ -627,18 +678,15 @@ export default function ActiveWorkoutScreen() {
           disabled={currentExerciseIndex === 0}
           onPress={previousExercise}
         >
-          <Text style={styles.navText}>
-            ← PREVIOUS
-          </Text>
+          <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
+          <Text style={styles.navText}>PREVIOUS</Text>
         </Pressable>
 
         <Pressable
           style={styles.navButton}
           onPress={skipExercise}
         >
-          <Text style={styles.skipText}>
-            SKIP
-          </Text>
+          <Text style={styles.skipText}>SKIP</Text>
         </Pressable>
 
         <Pressable
@@ -654,9 +702,8 @@ export default function ActiveWorkoutScreen() {
           }
           onPress={nextExercise}
         >
-          <Text style={styles.navText}>
-            NEXT →
-          </Text>
+          <Text style={styles.navText}>NEXT</Text>
+          <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
         </Pressable>
       </View>
 
@@ -685,18 +732,27 @@ function SetRow({
   onDone,
 }) {
   const [weight, setWeight] = useState(
-    setData?.weight
-      ? String(setData.weight)
-      : ''
+    setData?.weight ? String(setData.weight) : ''
   );
 
   const [reps, setReps] = useState(
-    setData?.reps
-      ? String(setData.reps)
-      : ''
+    setData?.reps ? String(setData.reps) : ''
   );
 
   const done = setData?.completed;
+
+  /*
+    Sync local state when setData changes externally
+    (e.g. after switching exercises back to a completed set)
+  */
+
+  if (setData?.weight && String(setData.weight) !== weight) {
+    setWeight(String(setData.weight));
+  }
+
+  if (setData?.reps && String(setData.reps) !== reps) {
+    setReps(String(setData.reps));
+  }
 
   return (
     <View style={styles.setRow}>
@@ -706,15 +762,25 @@ function SetRow({
         </Text>
       </View>
 
+      <View style={styles.setType}>
+        <Text style={styles.setTypeText}>
+          {done
+            ? '✓'
+            : setData?.setType === 'warmup'
+              ? 'W'
+              : 'N'}
+        </Text>
+      </View>
+
       <View style={styles.setInput}>
         <Text style={styles.inputLabel}>
-          KG
+          WEIGHT
         </Text>
 
         <TextInput
           value={weight}
           onChangeText={setWeight}
-          placeholder="0"
+          placeholder="___"
           placeholderTextColor="#555555"
           keyboardType="numeric"
           editable={!disabled && !done}
@@ -730,7 +796,7 @@ function SetRow({
         <TextInput
           value={reps}
           onChangeText={setReps}
-          placeholder="0"
+          placeholder="___"
           placeholderTextColor="#555555"
           keyboardType="numeric"
           editable={!disabled && !done}
@@ -802,11 +868,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-  },
-
-  backText: {
-    color: '#FFFFFF',
-    fontSize: 24,
   },
 
   timerBox: {
@@ -1013,9 +1074,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
+  setType: {
+    width: 28,
+    alignItems: 'center',
+    marginRight: 5,
+  },
+
+  setTypeText: {
+    color: '#555555',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   setInput: {
     flex: 1,
-    marginHorizontal: 4,
+    marginHorizontal: 3,
   },
 
   inputLabel: {
@@ -1063,6 +1136,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
     borderWidth: 1,
     borderColor: '#333333',
     marginTop: 8,
@@ -1074,30 +1150,76 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  extraOptions: {
-    marginTop: 8,
-    marginBottom: 10,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
 
-  extraOption: {
+  modalContent: {
     backgroundColor: '#151515',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 7,
+    borderRadius: 20,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
     borderWidth: 1,
     borderColor: '#252525',
   },
 
-  extraOptionTitle: {
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+
+  modalTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 18,
     fontWeight: '700',
   },
 
-  extraOptionSub: {
+  modalClose: {
+    padding: 4,
+  },
+
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C1C',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#252525',
+  },
+
+  modalOptionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#252525',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+
+  modalOptionText: {
+    flex: 1,
+  },
+
+  modalOptionTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  modalOptionSub: {
     color: '#666666',
-    fontSize: 10,
-    marginTop: 4,
+    fontSize: 11,
+    marginTop: 2,
   },
 
   navigation: {
@@ -1113,6 +1235,9 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     paddingVertical: 13,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 4,
     borderWidth: 1,
     borderColor: '#252525',
   },

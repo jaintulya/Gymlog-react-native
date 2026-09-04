@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,8 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { exercises } from '../utils/exercises';
-import {
-  recommendedWorkouts,
-} from '../utils/workout';
-import {
-  getData,
-  saveData,
-} from '../utils/storage';
+import { exercises } from '@/utils/exercises';
+import { getData, saveData } from '@/utils/storage';
 
 // Normalize equipment names
 const normalizeEquipment = (eq) => {
@@ -45,7 +39,7 @@ const normalizeEquipment = (eq) => {
   return map[eq] || eq;
 };
 
-export default function EditAddExerciseScreen() {
+export default function CustomAddExerciseScreen() {
   const { workoutId } = useLocalSearchParams();
 
   const [search, setSearch] = useState('');
@@ -55,7 +49,6 @@ export default function EditAddExerciseScreen() {
   const [selectedExercises, setSelectedExercises] = useState([]);
   const [workout, setWorkout] = useState(null);
 
-  // Compute available equipment from exercise data
   const equipmentOptions = useMemo(() => {
     const eqSet = new Set();
     exercises.forEach(ex => {
@@ -86,39 +79,36 @@ export default function EditAddExerciseScreen() {
   }, [workoutId]);
 
   const loadWorkout = async () => {
-    const saved = await getData(`editedWorkout_${workoutId}`);
+    if (!workoutId) return;
+    const saved = await getData(`customWorkout_${workoutId}`);
     if (saved) {
       setWorkout(saved);
       return;
     }
-    const original = Object.values(recommendedWorkouts).find(
-      item => item.id === workoutId
-    );
-    setWorkout(
-      original
-        ? JSON.parse(JSON.stringify(original))
-        : null
-    );
+    const pending = await getData('pendingCustomWorkout');
+    if (pending && pending.id === workoutId) {
+      setWorkout(pending);
+      return;
+    }
+    const list = (await getData('customWorkouts')) || [];
+    const found = list.find(w => w.id === workoutId);
+    if (found) setWorkout(found);
   };
 
-  // Filter logic
   const filteredExercises = useMemo(() => {
-    return exercises.filter(exercise => {
-      // Search: name, majorMuscle, targetArea
+    return exercises.filter(ex => {
       const searchLower = search.toLowerCase();
       const searchMatch =
         !search ||
-        exercise.name.toLowerCase().includes(searchLower) ||
-        exercise.majorMuscle.toLowerCase().includes(searchLower) ||
-        (exercise.targetArea && exercise.targetArea.toLowerCase().includes(searchLower));
+        ex.name.toLowerCase().includes(searchLower) ||
+        ex.majorMuscle.toLowerCase().includes(searchLower) ||
+        (ex.targetArea && ex.targetArea.toLowerCase().includes(searchLower));
 
-      // Muscle filter (OR)
       const muscleMatch =
         selectedMuscles.length === 0 ||
-        selectedMuscles.some(m => exercise.majorMuscle === m);
+        selectedMuscles.some(m => ex.majorMuscle === m);
 
-      // Equipment filter (OR)
-      const eqNorm = normalizeEquipment(exercise.equipment);
+      const eqNorm = normalizeEquipment(ex.equipment);
       const equipmentMatch =
         selectedEquipment.length === 0 ||
         selectedEquipment.some(e => eqNorm === e);
@@ -127,7 +117,6 @@ export default function EditAddExerciseScreen() {
     });
   }, [search, selectedMuscles, selectedEquipment]);
 
-  // Check if exercise already in workout
   const isExerciseInWorkout = (exerciseId) => {
     if (!workout) return false;
     return workout.exercises.some(ex => ex.exerciseId === exerciseId);
@@ -174,15 +163,13 @@ export default function EditAddExerciseScreen() {
   const addSelectedExercises = async () => {
     if (!workout || selectedExercises.length === 0) return;
 
-    // Filter out already existing
     const toAdd = selectedExercises.filter(id => !isExerciseInWorkout(id));
     if (toAdd.length === 0) {
-      // Maybe show a toast? Just close.
       router.back();
       return;
     }
 
-    const updatedWorkout = {
+    const updated = {
       ...workout,
       exercises: [
         ...workout.exercises,
@@ -199,11 +186,22 @@ export default function EditAddExerciseScreen() {
       ],
     };
 
-    await saveData(`editedWorkout_${workoutId}`, updatedWorkout);
+    // Update custom workout storage
+    const list = (await getData('customWorkouts')) || [];
+    const index = list.findIndex(w => w.id === workoutId);
+    if (index !== -1) {
+      list[index] = updated;
+      await saveData('customWorkouts', list);
+    }
+    await saveData(`customWorkout_${workoutId}`, updated);
+    await saveData('pendingCustomWorkout', updated);
+
     router.back();
   };
 
   const activeFilterCount = selectedMuscles.length + selectedEquipment.length;
+
+  if (!workout) return null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -326,7 +324,6 @@ export default function EditAddExerciseScreen() {
               </View>
 
               <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-                {/* Muscle Section */}
                 <Text style={styles.filterSectionTitle}>MUSCLE GROUPS</Text>
                 <View style={styles.chipContainer}>
                   {muscleOptions.map(muscle => {
@@ -348,7 +345,6 @@ export default function EditAddExerciseScreen() {
                   })}
                 </View>
 
-                {/* Equipment Section */}
                 <Text style={[styles.filterSectionTitle, { marginTop: 20 }]}>EQUIPMENT</Text>
                 <View style={styles.chipContainer}>
                   {equipmentOptions.map(eq => {
@@ -370,7 +366,6 @@ export default function EditAddExerciseScreen() {
                   })}
                 </View>
 
-                {/* Clear All */}
                 <Pressable style={styles.clearAllButton} onPress={clearAllFilters}>
                   <Text style={styles.clearAllText}>CLEAR ALL FILTERS</Text>
                 </Pressable>

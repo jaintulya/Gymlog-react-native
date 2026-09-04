@@ -409,7 +409,7 @@ export const exercises = [
   // ==================== SHOULDERS ====================
 
   {
-    id: 'shoulder-01',
+    id: 'shoulders-01',
     name: 'Barbell Overhead Press',
     majorMuscle: 'Shoulders',
     targetArea: 'Front Shoulders',
@@ -419,7 +419,7 @@ export const exercises = [
     description: 'Compound overhead press for overall shoulder strength.'
   },
   {
-    id: 'shoulder-02',
+    id: 'shoulders-02',
     name: 'Seated Dumbbell Shoulder Press',
     majorMuscle: 'Shoulders',
     targetArea: 'Front Shoulders',
@@ -429,7 +429,7 @@ export const exercises = [
     description: 'Seated dumbbell press for overall shoulder development.'
   },
   {
-    id: 'shoulder-03',
+    id: 'shoulders-03',
     name: 'Arnold Press',
     majorMuscle: 'Shoulders',
     targetArea: 'Front Shoulders',
@@ -439,7 +439,7 @@ export const exercises = [
     description: 'Rotational shoulder press using a large range of motion.'
   },
   {
-    id: 'shoulder-04',
+    id: 'shoulders-04',
     name: 'Dumbbell Lateral Raise',
     majorMuscle: 'Shoulders',
     targetArea: 'Side Shoulders',
@@ -449,7 +449,7 @@ export const exercises = [
     description: 'Isolation exercise primarily targeting the side deltoids.'
   },
   {
-    id: 'shoulder-05',
+    id: 'shoulders-05',
     name: 'Cable Lateral Raise',
     majorMuscle: 'Shoulders',
     targetArea: 'Side Shoulders',
@@ -459,7 +459,7 @@ export const exercises = [
     description: 'Cable lateral raise for side-delt development.'
   },
   {
-    id: 'shoulder-06',
+    id: 'shoulders-06',
     name: 'Machine Lateral Raise',
     majorMuscle: 'Shoulders',
     targetArea: 'Side Shoulders',
@@ -469,7 +469,7 @@ export const exercises = [
     description: 'Machine isolation movement for the side deltoids.'
   },
   {
-    id: 'shoulder-07',
+    id: 'shoulders-07',
     name: 'Front Raise',
     majorMuscle: 'Shoulders',
     targetArea: 'Front Shoulders',
@@ -479,7 +479,7 @@ export const exercises = [
     description: 'Isolation movement targeting the front deltoids.'
   },
   {
-    id: 'shoulder-08',
+    id: 'shoulders-08',
     name: 'Cable Front Raise',
     majorMuscle: 'Shoulders',
     targetArea: 'Front Shoulders',
@@ -489,7 +489,7 @@ export const exercises = [
     description: 'Cable front raise for controlled front-delt training.'
   },
   {
-    id: 'shoulder-09',
+    id: 'shoulders-09',
     name: 'Rear Delt Fly',
     majorMuscle: 'Shoulders',
     targetArea: 'Rear Shoulders',
@@ -499,7 +499,7 @@ export const exercises = [
     description: 'Isolation exercise for the rear deltoids.'
   },
   {
-    id: 'shoulder-10',
+    id: 'shoulders-10',
     name: 'Reverse Pec Deck',
     majorMuscle: 'Shoulders',
     targetArea: 'Rear Shoulders',
@@ -509,7 +509,7 @@ export const exercises = [
     description: 'Machine rear-delt fly for controlled posterior shoulder training.'
   },
   {
-    id: 'shoulder-11',
+    id: 'shoulders-11',
     name: 'Face Pull',
     majorMuscle: 'Shoulders',
     targetArea: 'Rear Shoulders',
@@ -519,7 +519,7 @@ export const exercises = [
     description: 'Cable pull emphasizing rear delts and upper-back muscles.'
   },
   {
-    id: 'shoulder-12',
+    id: 'shoulders-12',
     name: 'Upright Row',
     majorMuscle: 'Shoulders',
     targetArea: 'Side Shoulders',
@@ -529,7 +529,7 @@ export const exercises = [
     description: 'Vertical pulling movement involving the side delts and traps.'
   },
   {
-    id: 'shoulder-13',
+    id: 'shoulders-13',
     name: 'Dumbbell Shrug',
     majorMuscle: 'Shoulders',
     targetArea: 'Upper Traps',
@@ -539,7 +539,7 @@ export const exercises = [
     description: 'Shrug movement primarily developing the upper trapezius.'
   },
   {
-    id: 'shoulder-14',
+    id: 'shoulders-14',
     name: 'Barbell Shrug',
     majorMuscle: 'Shoulders',
     targetArea: 'Upper Traps',
@@ -549,7 +549,7 @@ export const exercises = [
     description: 'Loaded shrug for upper-trap development.'
   },
   {
-    id: 'shoulder-15',
+    id: 'shoulders-15',
     name: 'Cable Rear Delt Fly',
     majorMuscle: 'Shoulders',
     targetArea: 'Rear Shoulders',
