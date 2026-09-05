@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 20,
-    paddingBottom: 80,
+    paddingBottom: 20,
   },
   resultText: {
     color: '#666666',
@@ -514,10 +514,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     backgroundColor: '#0A0A0A',
     paddingHorizontal: 20,
     paddingVertical: 16,

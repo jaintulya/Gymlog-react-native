@@ -31,9 +31,7 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      getData('workoutHistory').then(data =>
-        setHistory(data || [])
-      );
+      getData('workoutHistory').then(data => setHistory(data || []));
     }, [])
   );
 
@@ -113,7 +111,7 @@ export default function HomeScreen() {
       {/* TODAY'S WORKOUT */}
 
       <Text style={styles.sectionLabel}>
-        TODAY'S WORKOUT
+        TODAY{`'`}S WORKOUT
       </Text>
 
       {isRestDay ? (
@@ -173,6 +171,49 @@ export default function HomeScreen() {
             </View>
           </View>
         </Pressable>
+      )}
+
+      {false && (
+        <View style={styles.ongoingSection}>
+          <Text style={styles.sectionLabel}>ONGOING WORKOUT</Text>
+          <Pressable
+            style={styles.ongoingCard}
+            onPress={() =>
+              router.push({
+                pathname: '/active-workout',
+                params: {
+                  workoutId: activeSession.workoutId,
+                  startedAt: activeSession.startedAt,
+                },
+              })
+            }
+          >
+            <View>
+              <Text style={styles.ongoingName}>
+                {(activeSession.workout?.name || 'WORKOUT').toUpperCase()}
+              </Text>
+              <Text style={styles.ongoingMeta}>
+                UNFINISHED · {formatDuration(activeSession.workoutTime || 0)} active
+              </Text>
+            </View>
+            <View style={styles.ongoingActions}>
+              <Pressable
+                style={styles.discardButton}
+                accessibilityLabel="Discard ongoing workout"
+                onPress={event => {
+                  event.stopPropagation();
+                  discardOngoingWorkout();
+                }}
+              >
+                <Ionicons name="trash-outline" size={16} color="#DD7777" />
+              </Pressable>
+              <View style={styles.ongoingResume}>
+                <Ionicons name="play" size={15} color="#000000" />
+                <Text style={styles.ongoingResumeText}>RESUME</Text>
+              </View>
+            </View>
+          </Pressable>
+        </View>
       )}
 
       {/* RECENT WORKOUT */}
@@ -492,6 +533,66 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  ongoingSection: {
+    marginBottom: 28,
+  },
+
+  ongoingCard: {
+    alignItems: 'center',
+    backgroundColor: '#151515',
+    borderColor: '#496B53',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+
+  ongoingName: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  ongoingMeta: {
+    color: '#8DCF9E',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 5,
+  },
+
+  ongoingResume: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 9,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+  },
+
+  ongoingActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
+
+  discardButton: {
+    alignItems: 'center',
+    borderColor: '#5A2A2A',
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+
+  ongoingResumeText: {
+    color: '#000000',
+    fontSize: 10,
+    fontWeight: '800',
   },
 
   /* REST DAY */

@@ -8,6 +8,13 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  formatClockTime,
+  formatDuration as formatFriendlyDuration,
+  formatLongDate,
+  getRecordDate,
+} from '../utils/date-time';
+import { exercises } from '../utils/exercises';
 
 export default function WorkoutDetailsScreen() {
   const { workoutData } = useLocalSearchParams();
@@ -85,7 +92,7 @@ export default function WorkoutDetailsScreen() {
   if (data?.workoutExercises && data?.setsData) {
     data.workoutExercises.forEach(exercise => {
       const exId = exercise.exerciseId;
-      const sets = data.setsData[exId] || [];
+      const sets = data.setsData[exercise.id] || [];
 
       exerciseEntries.push({
         ...exercise,
@@ -107,7 +114,10 @@ export default function WorkoutDetailsScreen() {
 
       return {
         id: skippedId,
-        name: found?.name || skippedId,
+        name:
+          found?.name ||
+          exercises.find(exercise => exercise.id === skippedId)?.name ||
+          skippedId,
       };
     }) || [];
 
@@ -187,7 +197,7 @@ export default function WorkoutDetailsScreen() {
           />
 
           <Text style={styles.dateText}>
-            {formatDate(data.date)}
+            {formatLongDate(getRecordDate(data))}
           </Text>
         </View>
       </View>
@@ -200,7 +210,7 @@ export default function WorkoutDetailsScreen() {
         </Text>
 
         <Text style={styles.timeValue}>
-          {formatTime(data.duration || 0)}
+          {formatFriendlyDuration(data.duration || 0)}
         </Text>
       </View>
 
@@ -250,15 +260,15 @@ export default function WorkoutDetailsScreen() {
 
       {exerciseEntries.map(
         (exercise, index) => {
+          const timing = data.exerciseTiming?.[exercise.id];
           const exTime =
-            (data.exerciseTimes &&
-              data.exerciseTimes[
-                exercise.exerciseId
-              ]) ||
+            timing?.exerciseDuration ??
+            data.exerciseTimes?.[exercise.id] ??
             0;
 
           const exName =
             exercise.name ||
+            exercises.find(item => item.id === exercise.exerciseId)?.name ||
             exercise.exerciseId;
 
           return (
@@ -292,9 +302,15 @@ export default function WorkoutDetailsScreen() {
                 </Text>
 
                 <Text style={styles.exerciseTimeValue}>
-                  {formatTime(exTime)}
+                  {formatFriendlyDuration(exTime)}
                 </Text>
               </View>
+
+              {timing?.exerciseStartedAt && (
+                <Text style={styles.exerciseTimingRange}>
+                  {formatClockTime(timing.exerciseStartedAt)} – {formatClockTime(timing.exerciseCompletedAt)}
+                </Text>
+              )}
 
               {/* SETS TABLE */}
 
@@ -759,6 +775,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+
+  exerciseTimingRange: {
+    color: '#666666',
+    fontSize: 11,
+    marginTop: 7,
   },
 
   /* SETS TABLE */

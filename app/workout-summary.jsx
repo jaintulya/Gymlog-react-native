@@ -8,7 +8,13 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
-import { saveData, getData } from '../utils/storage';
+import { saveData, getData, removeData } from '../utils/storage';
+import {
+  formatClockTime,
+  formatDuration,
+  formatLongDate,
+  getRecordDate,
+} from '../utils/date-time';
 
 export default function WorkoutSummaryScreen() {
   const { workoutData } = useLocalSearchParams();
@@ -37,45 +43,39 @@ export default function WorkoutSummaryScreen() {
       (await getData('workoutHistory')) || [];
 
     const historyItem = {
-      id: Date.now().toString(),
-
-      workoutId: workout.workoutId,
-
-      workoutName: workout.workoutName,
-
-      date: new Date().toISOString(),
-
-      duration: workout.duration || 0,
-
-      exerciseTimes:
-        workout.exerciseTimes || {},
-
-      workoutExercises:
-        workout.workoutExercises || [],
-
-      setsData:
-        workout.setsData || {},
-
-      skippedExercises:
-        workout.skippedExercises || [],
-
-      isCustom:
-        workout.isCustom || false,
-
-      totalSets:
-        workout.totalSets || 0,
-
-      totalReps:
-        workout.totalReps || 0,
-
-      totalVolume:
-        workout.totalVolume || 0,
+      ...workout,
+      id: workout.recordId || workout.id || Date.now().toString(),
+      date: workout.startedAt || workout.completedAt || workout.date,
+      duration: Number(workout.duration) || 0,
+      exerciseTimes: workout.exerciseTimes || {},
+      exerciseTiming: workout.exerciseTiming || {},
+      workoutExercises: workout.workoutExercises || [],
+      setsData: workout.setsData || {},
+      skippedExercises: workout.skippedExercises || [],
+      isCustom: !!workout.isCustom,
+      totalSets: Number(workout.totalSets) || 0,
+      totalReps: Number(workout.totalReps) || 0,
+      totalVolume: Number(workout.totalVolume) || 0,
     };
+
+    const withoutDuplicate = oldHistory.filter(item =>
+      historyItem.recordId
+        ? item.id !== historyItem.id && item.recordId !== historyItem.recordId
+        : item.id !== historyItem.id
+    );
 
     await saveData(
       'workoutHistory',
-      [historyItem, ...oldHistory]
+      [historyItem, ...withoutDuplicate]
     );
+
+    const activeSession = await getData('activeWorkoutSession');
+    if (
+      activeSession?.recordId === historyItem.recordId ||
+      activeSession?.recordId === historyItem.id
+    ) {
+      await removeData('activeWorkoutSession');
+    }
   };
 
   if (!data) {
@@ -87,15 +87,6 @@ export default function WorkoutSummaryScreen() {
       </View>
     );
   }
-
-  const formatTime = seconds => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-
-    return `${String(mins).padStart(2, '0')}:${String(
-      secs
-    ).padStart(2, '0')}`;
-  };
 
   return (
     <ScrollView
@@ -116,7 +107,14 @@ export default function WorkoutSummaryScreen() {
         </Text>
 
         <Text style={styles.time}>
-          {formatTime(data.duration || 0)}
+          {formatDuration(data.duration || 0)}
+        </Text>
+      </View>
+
+      <View style={styles.dateCard}>
+        <Text style={styles.dateText}>{formatLongDate(getRecordDate(data))}</Text>
+        <Text style={styles.dateSubtext}>
+          {formatClockTime(data.startedAt)} – {formatClockTime(data.completedAt)}
         </Text>
       </View>
 
@@ -245,6 +243,23 @@ const styles = StyleSheet.create({
     fontSize: 43,
     fontWeight: '700',
     marginTop: 7,
+  },
+
+  dateCard: {
+    alignItems: 'center',
+    marginTop: 14,
+  },
+
+  dateText: {
+    color: '#AAAAAA',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  dateSubtext: {
+    color: '#666666',
+    fontSize: 12,
+    marginTop: 5,
   },
 
   stats: {

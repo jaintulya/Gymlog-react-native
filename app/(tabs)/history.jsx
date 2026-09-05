@@ -7,24 +7,48 @@ import {
   StyleSheet,
   Animated,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { getData, saveData } from '../../utils/storage';
+import { getData, removeData, saveData } from '../../utils/storage';
+import {
+  formatClockTime,
+  formatDuration as formatFriendlyDuration,
+  getHistoryDateLabel,
+  getRecordDate,
+} from '../../utils/date-time';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState([]);
+  const [activeSession, setActiveSession] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [deleteName, setDeleteName] = useState('');
   const [swipedId, setSwipedId] = useState(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const loadHistory = async () => {
-    const data = (await getData('workoutHistory')) || [];
-    setHistory(data);
+    const [data, session] = await Promise.all([
+      getData('workoutHistory'),
+      getData('activeWorkoutSession'),
+    ]);
+    setHistory(data || []);
+    const hasCompletedActiveSession = (data || []).some(
+      item =>
+        session?.recordId &&
+        (item.recordId === session.recordId || item.id === session.recordId)
+    );
+    if (hasCompletedActiveSession) {
+      await removeData('activeWorkoutSession');
+    }
+    setActiveSession(
+      !hasCompletedActiveSession && session?.status === 'active' && session.workout
+        ? session
+        : null
+    );
   };
 
   useFocusEffect(
@@ -48,12 +72,6 @@ export default function HistoryScreen() {
     return `${day} ${month} ${year} · ${time}`;
   };
 
-  const formatDuration = seconds => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
-  };
-
   const formatVolume = vol => {
     if (!vol && vol !== 0) return '0';
     return Number(vol).toLocaleString();
@@ -66,11 +84,28 @@ export default function HistoryScreen() {
 
   const confirmDelete = async () => {
     if (!deleteId) return;
+    if (deleteId === 'ALL_HISTORY') {
+      await saveData('workoutHistory', []);
+      setHistory([]);
+      setDeleteId(null);
+      setDeleteName('');
+      return;
+    }
     const updated = history.filter(item => item.id !== deleteId);
     await saveData('workoutHistory', updated);
     setHistory(updated);
     setDeleteId(null);
     setDeleteName('');
+  };
+
+  const openClearAll = () => {
+    setDeleteId('ALL_HISTORY');
+    setDeleteName('all workouts');
+  };
+
+  const discardOngoingWorkout = async () => {
+    await removeData('activeWorkoutSession');
+    setActiveSession(null);
   };
 
   const cancelDelete = () => {
@@ -84,6 +119,13 @@ export default function HistoryScreen() {
       params: { workoutData: JSON.stringify(item) },
     });
   };
+
+  const groupedHistory = history.reduce((groups, item) => {
+    const label = getHistoryDateLabel(getRecordDate(item));
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(item);
+    return groups;
+  }, {});
 
   return (
     <ScrollView
@@ -100,13 +142,67 @@ export default function HistoryScreen() {
           </Text>
         </View>
 
-        <View style={styles.iconCircle}>
-          <Ionicons name="time" size={20} color="#FFFFFF" />
+        <View style={styles.headerActions}>
+          {history.length > 0 && (
+            <Pressable style={styles.clearAllButton} onPress={openClearAll}>
+              <Text style={styles.clearAllText}>CLEAR ALL</Text>
+            </Pressable>
+          )}
+          <View style={styles.iconCircle}>
+            <Ionicons name="time" size={20} color="#FFFFFF" />
+          </View>
         </View>
       </View>
 
+      {false && (
+        <View style={styles.ongoingSection}>
+          <Text style={styles.dateGroupTitle}>ONGOING</Text>
+          <Pressable
+            style={[styles.card, styles.ongoingCard]}
+            onPress={() =>
+              router.push({
+                pathname: '/active-workout',
+                params: {
+                  workoutId: activeSession.workoutId,
+                  startedAt: activeSession.startedAt,
+                },
+              })
+            }
+          >
+            <View style={styles.cardTop}>
+              <View style={styles.cardTopLeft}>
+                <Text style={styles.workoutName}>
+                  {(activeSession.workout?.name || 'WORKOUT').toUpperCase()}
+                </Text>
+                <Text style={styles.dateText}>
+                  Started {formatClockTime(activeSession.startedAt)}
+                </Text>
+              </View>
+              <View style={styles.ongoingBadge}>
+                <Text style={styles.ongoingBadgeText}>ONGOING</Text>
+              </View>
+            </View>
+            <View style={styles.ongoingBottomRow}>
+              <Text style={styles.ongoingMeta}>
+                {formatFriendlyDuration(activeSession.workoutTime || 0)} active time
+              </Text>
+              <Pressable
+                style={styles.discardOngoingButton}
+                onPress={event => {
+                  event.stopPropagation();
+                  discardOngoingWorkout();
+                }}
+              >
+                <Ionicons name="trash-outline" size={14} color="#DD7777" />
+                <Text style={styles.discardOngoingText}>DISCARD</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </View>
+      )}
+
       {/* EMPTY STATE */}
-      {history.length === 0 ? (
+      {history.length === 0 && !activeSession ? (
         <View style={styles.emptyCard}>
           <View style={styles.emptyIconWrap}>
             <Ionicons name="barbell-outline" size={36} color="#333333" />
@@ -114,10 +210,13 @@ export default function HistoryScreen() {
           <Text style={styles.emptyTitle}>NO WORKOUTS YET</Text>
           <Text style={styles.emptyText}>Complete your first workout to see it here.</Text>
         </View>
-      ) : (
+      ) : history.length > 0 ? (
         /* WORKOUT CARDS */
-        history.map(item => (
-          <Pressable
+        Object.entries(groupedHistory).map(([dateLabel, entries]) => (
+          <View key={dateLabel}>
+            <Text style={styles.dateGroupTitle}>{dateLabel.toUpperCase()}</Text>
+            {entries.map(item => (
+              <Pressable
             key={item.id}
             style={styles.card}
             onPress={() => navigateToDetails(item)}
@@ -133,12 +232,16 @@ export default function HistoryScreen() {
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.dateText}>{formatDate(item.date)}</Text>
+                <Text style={styles.dateText}>
+                  {item.startedAt
+                    ? `${formatClockTime(item.startedAt)} – ${formatClockTime(item.completedAt)}`
+                    : formatDate(item.date)}
+                </Text>
               </View>
 
               <View style={styles.durationBlock}>
                 <Ionicons name="time-outline" size={14} color="#555555" />
-                <Text style={styles.duration}>{formatDuration(item.duration || 0)}</Text>
+                <Text style={styles.duration}>{formatFriendlyDuration(item.duration || 0)}</Text>
               </View>
             </View>
 
@@ -175,9 +278,11 @@ export default function HistoryScreen() {
                 <Ionicons name="chevron-forward" size={16} color="#333333" />
               </View>
             </View>
-          </Pressable>
+              </Pressable>
+            ))}
+          </View>
         ))
-      )}
+      ) : null}
 
       {/* DELETE CONFIRMATION MODAL */}
       <Modal
@@ -192,9 +297,13 @@ export default function HistoryScreen() {
               <Ionicons name="trash-outline" size={32} color="#FF4444" />
             </View>
 
-            <Text style={styles.modalTitle}>DELETE WORKOUT?</Text>
+            <Text style={styles.modalTitle}>
+              {deleteId === 'ALL_HISTORY' ? 'CLEAR HISTORY?' : 'DELETE WORKOUT?'}
+            </Text>
             <Text style={styles.modalText}>
-              Are you sure you want to remove "{deleteName}" from your history? This action cannot be undone.
+              {deleteId === 'ALL_HISTORY'
+                ? 'This permanently removes every completed workout from History.'
+                : `Are you sure you want to remove "${deleteName}" from your history? This action cannot be undone.`}
             </Text>
 
             <View style={styles.modalButtons}>
@@ -204,7 +313,9 @@ export default function HistoryScreen() {
 
               <Pressable style={styles.deleteConfirmButton} onPress={confirmDelete}>
                 <Ionicons name="trash-outline" size={16} color="#FFFFFF" />
-                <Text style={styles.deleteConfirmText}>DELETE</Text>
+                <Text style={styles.deleteConfirmText}>
+                  {deleteId === 'ALL_HISTORY' ? 'CLEAR ALL' : 'DELETE'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -229,6 +340,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 28,
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  clearAllButton: {
+    borderColor: '#5A2A2A',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+  },
+  clearAllText: {
+    color: '#DD7777',
+    fontSize: 9,
+    fontWeight: '800',
   },
   title: {
     color: '#FFFFFF',
@@ -290,6 +418,59 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#252525',
+  },
+  dateGroupTitle: {
+    color: '#777777',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+    marginTop: 8,
+  },
+  ongoingSection: {
+    marginBottom: 10,
+  },
+  ongoingCard: {
+    borderColor: '#496B53',
+  },
+  ongoingBadge: {
+    backgroundColor: '#1E3826',
+    borderColor: '#496B53',
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  ongoingBadgeText: {
+    color: '#8DCF9E',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  ongoingMeta: {
+    color: '#8DCF9E',
+    fontSize: 12,
+    marginTop: 14,
+  },
+  ongoingBottomRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 14,
+  },
+  discardOngoingButton: {
+    alignItems: 'center',
+    borderColor: '#5A2A2A',
+    borderRadius: 7,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  discardOngoingText: {
+    color: '#DD7777',
+    fontSize: 9,
+    fontWeight: '800',
   },
   cardTop: {
     flexDirection: 'row',

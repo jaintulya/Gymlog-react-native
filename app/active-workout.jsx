@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ScrollView,
   View,
@@ -7,6 +7,10 @@ import {
   TextInput,
   StyleSheet,
   Modal,
+  PanResponder,
+  Animated,
+  Linking,
+  LayoutAnimation,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,10 +21,11 @@ import {
 } from '../utils/workout';
 
 import { exercises } from '../utils/exercises';
-import { getData, saveData } from '../utils/storage';
+import { getData, removeData, saveData } from '../utils/storage';
+import { localTimestamp } from '../utils/date-time';
 
 export default function ActiveWorkoutScreen() {
-  const { workoutId } = useLocalSearchParams();
+  const { workoutId, startedAt: startedAtParam } = useLocalSearchParams();
 
   const [workout, setWorkout] = useState(null);
 
@@ -32,6 +37,7 @@ export default function ActiveWorkoutScreen() {
   const [workoutTime, setWorkoutTime] = useState(0);
 
   const [exerciseTimes, setExerciseTimes] = useState({});
+  const [exerciseTiming, setExerciseTiming] = useState({});
 
   const [restTime, setRestTime] = useState(0);
 
@@ -41,10 +47,19 @@ export default function ActiveWorkoutScreen() {
 
   const [showExtraModal, setShowExtraModal] = useState(false);
 
-  const [skippedExercises, setSkippedExercises] =
-    useState([]);
+  const [showExerciseInfo, setShowExerciseInfo] = useState(false);
+  const [setEditMode, setSetEditMode] = useState(false);
+  const [setDrag, setSetDrag] = useState(null);
 
   const [isCustom, setIsCustom] = useState(false);
+  const [startedAt, setStartedAt] = useState(null);
+  const [recordId, setRecordId] = useState(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [setsInitialized, setSetsInitialized] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const finishingRef = useRef(false);
+  const loadedSessionWorkoutIdRef = useRef(null);
+  const loadRequestIdRef = useRef(0);
 
   /*
     LOAD WORKOUT
@@ -55,36 +70,103 @@ export default function ActiveWorkoutScreen() {
   }, [workoutId]);
 
   const loadWorkout = async () => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = () => loadRequestIdRef.current === requestId;
+    // Prevent a previously mounted workout screen from saving its old state
+    // while a new workoutId is loading.
+    loadedSessionWorkoutIdRef.current = null;
+    const savedSession = await getData('activeWorkoutSession');
+    if (!isCurrentRequest()) return;
+    const shouldRestoreSession =
+      savedSession?.status === 'active' &&
+      savedSession?.workoutId === workoutId &&
+      savedSession.workout &&
+      savedSession.workout.id === workoutId;
+
+    if (shouldRestoreSession) {
+      loadedSessionWorkoutIdRef.current = workoutId;
+      setWorkout(savedSession.workout);
+      setCurrentExerciseIndex(savedSession.currentExerciseIndex || 0);
+      setSetsData(savedSession.setsData || {});
+      setWorkoutTime(savedSession.workoutTime || 0);
+      setExerciseTimes(savedSession.exerciseTimes || {});
+      setExerciseTiming(savedSession.exerciseTiming || {});
+      setRestTime(savedSession.restTime || 0);
+      setIsResting(false);
+      setIsPaused(false);
+      setIsCustom(!!savedSession.isCustom);
+      setStartedAt(savedSession.startedAt || localTimestamp());
+      setRecordId(savedSession.recordId || `${workoutId}-${Date.now()}`);
+      setSetsInitialized(true);
+      setSessionReady(true);
+      return;
+    }
+
+    if (savedSession?.workoutId === workoutId) {
+      await removeData('activeWorkoutSession');
+      if (!isCurrentRequest()) return;
+    }
+
+    const beginSession = async (nextWorkout, custom) => {
+      if (!isCurrentRequest()) return;
+      const sessionStartedAt = startedAtParam || localTimestamp();
+      const sessionRecordId = `${workoutId}-${Date.now()}`;
+
+      setWorkout(nextWorkout);
+      setIsCustom(custom);
+      setStartedAt(sessionStartedAt);
+      setRecordId(sessionRecordId);
+      setSessionReady(true);
+      loadedSessionWorkoutIdRef.current = workoutId;
+
+      // Persist immediately so leaving the screen right after Start Workout
+      // still creates a resumable ongoing session.
+      await saveData('activeWorkoutSession', {
+        status: 'active',
+        workoutId,
+        workout: nextWorkout,
+        currentExerciseIndex: 0,
+        setsData: {},
+        workoutTime: 0,
+        exerciseTimes: {},
+        exerciseTiming: {},
+        restTime: 0,
+        isCustom: custom,
+        startedAt: sessionStartedAt,
+        recordId: sessionRecordId,
+      });
+    };
+
     // 1. Check edited recommended
     const edited = await getData(`editedWorkout_${workoutId}`);
+    if (!isCurrentRequest()) return;
     if (edited) {
-      setWorkout(edited);
-      setIsCustom(true);
+      await beginSession(edited, true);
       return;
     }
 
     // 2. Check custom workout (saved individual)
     const customSaved = await getData(`customWorkout_${workoutId}`);
+    if (!isCurrentRequest()) return;
     if (customSaved) {
-      setWorkout(customSaved);
-      setIsCustom(true);
+      await beginSession(customSaved, true);
       return;
     }
 
     // 3. Check custom workouts list
     const customList = (await getData('customWorkouts')) || [];
+    if (!isCurrentRequest()) return;
     const found = customList.find(w => w.id === workoutId);
     if (found) {
-      setWorkout(found);
-      setIsCustom(true);
+      await beginSession(found, true);
       return;
     }
 
     // 4. Check pending custom workout
     const pending = await getData('pendingCustomWorkout');
+    if (!isCurrentRequest()) return;
     if (pending && pending.id === workoutId) {
-      setWorkout(pending);
-      setIsCustom(true);
+      await beginSession(pending, true);
       return;
     }
 
@@ -94,8 +176,7 @@ export default function ActiveWorkoutScreen() {
     ).find(item => item.id === workoutId);
 
     if (original) {
-      setWorkout(original);
-      setIsCustom(false);
+      await beginSession(original, false);
     } else {
       setWorkout(null);
     }
@@ -122,28 +203,70 @@ export default function ActiveWorkoutScreen() {
     if (Object.keys(initial).length > 0) {
       setSetsData(prev => ({ ...prev, ...initial }));
     }
+    setSetsInitialized(true);
   }, [workout]);
+
+  useEffect(() => {
+    if (
+      finishingRef.current ||
+      loadedSessionWorkoutIdRef.current !== workoutId ||
+      !sessionReady ||
+      !setsInitialized ||
+      !workout ||
+      !startedAt ||
+      !recordId
+    ) return;
+
+    saveData('activeWorkoutSession', {
+      status: 'active',
+      workoutId,
+      workout,
+      currentExerciseIndex,
+      setsData,
+      workoutTime,
+      exerciseTimes,
+      exerciseTiming,
+      restTime,
+      isCustom,
+      startedAt,
+      recordId,
+    });
+  }, [
+    workoutId,
+    workout,
+    currentExerciseIndex,
+    setsData,
+    workoutTime,
+    exerciseTimes,
+    exerciseTiming,
+    restTime,
+    isCustom,
+    startedAt,
+    recordId,
+    sessionReady,
+    setsInitialized,
+  ]);
 
   /*
     WORKOUT TIMER
   */
 
   useEffect(() => {
-    if (isPaused || !workout) return;
+    if (isPaused || isFinishing || !workout) return;
 
     const timer = setInterval(() => {
       setWorkoutTime(prev => prev + 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isPaused, workout]);
+  }, [isPaused, isFinishing, workout]);
 
   /*
     EXERCISE TIMER
   */
 
   useEffect(() => {
-    if (isPaused || !workout) return;
+    if (isPaused || isFinishing || !workout) return;
 
     const currentExercise =
       workout.exercises[currentExerciseIndex];
@@ -156,6 +279,16 @@ export default function ActiveWorkoutScreen() {
         [currentExercise.id]:
           (prev[currentExercise.id] || 0) + 1,
       }));
+      setExerciseTiming(prev =>
+        prev[currentExercise.id]
+          ? prev
+          : {
+              ...prev,
+              [currentExercise.id]: {
+                exerciseStartedAt: localTimestamp(),
+              },
+            }
+      );
     }, 1000);
 
     return () => clearInterval(timer);
@@ -163,6 +296,7 @@ export default function ActiveWorkoutScreen() {
     currentExerciseIndex,
     workout,
     isPaused,
+    isFinishing,
   ]);
 
   /*
@@ -173,6 +307,7 @@ export default function ActiveWorkoutScreen() {
     if (
       !isResting ||
       isPaused ||
+      isFinishing ||
       restTime <= 0
     ) {
       return;
@@ -190,7 +325,7 @@ export default function ActiveWorkoutScreen() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isResting, isPaused, restTime]);
+  }, [isResting, isPaused, isFinishing, restTime]);
 
   if (!workout) {
     return (
@@ -230,7 +365,7 @@ export default function ActiveWorkoutScreen() {
   */
 
   const completeSet = (setIndex, weight, reps) => {
-    if (!weight || !reps || isPaused) return;
+    if (!reps || isPaused) return;
 
     const list = [...(setsData[currentExercise.id] || [])];
 
@@ -245,12 +380,15 @@ export default function ActiveWorkoutScreen() {
 
       completed: true,
 
-      completedAt: new Date().toISOString(),
+      completedAt: localTimestamp(),
+
+      setNumber: existing.setNumber || setIndex + 1,
 
       restSeconds: restTime || currentExercise.rest,
     };
 
     list[setIndex] = completedSet;
+    list.sort((a, b) => Number(b.completed) - Number(a.completed));
 
     setSetsData(prev => ({
       ...prev,
@@ -300,6 +438,81 @@ export default function ActiveWorkoutScreen() {
     });
   };
 
+  const editSet = setIndex => {
+    if (isPaused) return;
+
+    setSetsData(prev => {
+      const list = [...(prev[currentExercise.id] || [])];
+      const set = list[setIndex];
+      if (!set) return prev;
+
+      list[setIndex] = { ...set, completed: false };
+      list.sort((a, b) => Number(b.completed) - Number(a.completed));
+      return { ...prev, [currentExercise.id]: list };
+    });
+  };
+
+  const moveSet = (setId, toIndex) => {
+    if (isPaused) return;
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+    setSetsData(prev => {
+      const list = [...(prev[currentExercise.id] || [])];
+      const fromIndex = list.findIndex(set => set.id === setId);
+      if (fromIndex === -1) return prev;
+      const targetIndex = Math.max(
+        0,
+        Math.min(list.length - 1, toIndex)
+      );
+      if (targetIndex === fromIndex) return prev;
+
+      const [movedSet] = list.splice(fromIndex, 1);
+      list.splice(targetIndex, 0, movedSet);
+      list.sort((a, b) => Number(b.completed) - Number(a.completed));
+      return { ...prev, [currentExercise.id]: list };
+    });
+  };
+
+  const startSetDrag = (setId, fromIndex) => {
+    setSetDrag({ setId, fromIndex, toIndex: fromIndex });
+  };
+
+  const previewSetDrag = (setId, fromIndex, distance) => {
+    const toIndex = Math.max(
+      0,
+      Math.min(currentSets.length - 1, fromIndex + Math.round(distance / 70))
+    );
+
+    setSetDrag(current =>
+      current?.setId === setId && current.toIndex !== toIndex
+        ? { ...current, toIndex }
+        : current
+    );
+  };
+
+  const endSetDrag = (setId, fromIndex, toIndex) => {
+    setSetDrag(null);
+    if (toIndex !== fromIndex) moveSet(setId, toIndex);
+  };
+
+  const deleteSet = setId => {
+    if (isPaused) return;
+
+    setSetsData(prev => ({
+      ...prev,
+      [currentExercise.id]: (prev[currentExercise.id] || []).filter(
+        set => set.id !== setId
+      ),
+    }));
+  };
+
+  const openExerciseVideo = () => {
+    if (!exerciseData) return;
+    const search = encodeURIComponent(`${exerciseData.name} proper form tutorial`);
+    Linking.openURL(`https://www.youtube.com/results?search_query=${search}`);
+  };
+
   /*
     REST CONTROLS
   */
@@ -326,6 +539,19 @@ export default function ActiveWorkoutScreen() {
       currentExerciseIndex <
       workout.exercises.length - 1
     ) {
+      const now = localTimestamp();
+      setExerciseTiming(prev => {
+        const current = prev[currentExercise.id];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [currentExercise.id]: {
+            ...current,
+            exerciseCompletedAt: now,
+            exerciseDuration: exerciseTimes[currentExercise.id] || 0,
+          },
+        };
+      });
       setCurrentExerciseIndex(
         prev => prev + 1
       );
@@ -337,6 +563,19 @@ export default function ActiveWorkoutScreen() {
 
   const previousExercise = () => {
     if (currentExerciseIndex > 0) {
+      const now = localTimestamp();
+      setExerciseTiming(prev => {
+        const current = prev[currentExercise.id];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [currentExercise.id]: {
+            ...current,
+            exerciseCompletedAt: now,
+            exerciseDuration: exerciseTimes[currentExercise.id] || 0,
+          },
+        };
+      });
       setCurrentExerciseIndex(
         prev => prev - 1
       );
@@ -347,29 +586,13 @@ export default function ActiveWorkoutScreen() {
   };
 
   /*
-    SKIP EXERCISE
-  */
-
-  const skipExercise = () => {
-    if (
-      !skippedExercises.includes(
-        currentExercise.id
-      )
-    ) {
-      setSkippedExercises(prev => [
-        ...prev,
-        currentExercise.id,
-      ]);
-    }
-
-    nextExercise();
-  };
-
-  /*
     FINISH
   */
 
-  const finishWorkout = () => {
+  const finishWorkout = async () => {
+    finishingRef.current = true;
+    setIsFinishing(true);
+    setSessionReady(false);
     let totalSets = 0;
     let totalReps = 0;
     let totalVolume = 0;
@@ -388,13 +611,39 @@ export default function ActiveWorkoutScreen() {
       });
     });
 
+    const skippedExercises = workout.exercises
+      .filter(exercise => {
+        const exerciseSets = setsData[exercise.id] || [];
+        return !exerciseSets.some(
+          set => set.completed && Number(set.reps) > 0
+        );
+      })
+      .map(exercise => exercise.exerciseId);
+
+    const completedAt = localTimestamp();
+    const finalExerciseTiming = { ...exerciseTiming };
+    const currentTiming = finalExerciseTiming[currentExercise.id];
+    if (currentTiming) {
+      finalExerciseTiming[currentExercise.id] = {
+        ...currentTiming,
+        exerciseCompletedAt: completedAt,
+        exerciseDuration: exerciseTimes[currentExercise.id] || 0,
+      };
+    }
+
     const workoutData = {
+      recordId,
       workoutId: workout.id,
       workoutName: workout.name,
+
+      startedAt,
+      completedAt,
 
       duration: workoutTime,
 
       exerciseTimes,
+
+      exerciseTiming: finalExerciseTiming,
 
       workoutExercises: workout.exercises,
 
@@ -408,6 +657,13 @@ export default function ActiveWorkoutScreen() {
       totalReps,
       totalVolume,
     };
+
+    await removeData('activeWorkoutSession');
+    await saveData('activeWorkoutSession', {
+      status: 'completed',
+      recordId,
+      completedAt,
+    });
 
     router.push({
       pathname: '/workout-summary',
@@ -496,10 +752,19 @@ export default function ActiveWorkoutScreen() {
           EXERCISE {currentExerciseIndex + 1}
         </Text>
 
-        <Text style={styles.exerciseName}>
-          {exerciseData?.name ||
-            currentExercise.exerciseId}
-        </Text>
+        <View style={styles.exerciseNameRow}>
+          <Text style={styles.exerciseName}>
+            {exerciseData?.name ||
+              currentExercise.exerciseId}
+          </Text>
+          <Pressable
+            accessibilityLabel="Exercise instructions"
+            style={styles.infoButton}
+            onPress={() => setShowExerciseInfo(true)}
+          >
+            <Ionicons name="help" size={16} color="#000000" />
+          </Pressable>
+        </View>
 
         {exerciseData && (
           <Text style={styles.target}>
@@ -566,9 +831,25 @@ export default function ActiveWorkoutScreen() {
 
       {/* SETS */}
 
-      <Text style={styles.sectionTitle}>
-        SETS
-      </Text>
+      <View style={styles.setsHeader}>
+        <Text style={styles.sectionTitle}>SETS</Text>
+        <Pressable
+          style={[styles.setsEditButton, setEditMode && styles.setsEditButtonActive]}
+          onPress={() => {
+            setSetEditMode(prev => !prev);
+            setSetDrag(null);
+          }}
+        >
+          <Ionicons
+            name={setEditMode ? 'checkmark' : 'pencil'}
+            size={15}
+            color={setEditMode ? '#000000' : '#FFFFFF'}
+          />
+          <Text style={[styles.setsEditText, setEditMode && styles.setsEditTextActive]}>
+            {setEditMode ? 'DONE' : 'EDIT'}
+          </Text>
+        </Pressable>
+      </View>
 
       {currentSets.map((set, index) => (
         <SetRow
@@ -577,6 +858,13 @@ export default function ActiveWorkoutScreen() {
           setData={set}
           disabled={isPaused}
           onDone={completeSet}
+          onEdit={editSet}
+          onDelete={deleteSet}
+          isEditing={setEditMode}
+          dragState={setDrag}
+          onDragStart={startSetDrag}
+          onDragMove={previewSetDrag}
+          onDragEnd={endSetDrag}
         />
       ))}
 
@@ -666,6 +954,62 @@ export default function ActiveWorkoutScreen() {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={showExerciseInfo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowExerciseInfo(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Exercise guide</Text>
+              <Pressable
+                style={styles.modalClose}
+                accessibilityLabel="Close exercise guide"
+                onPress={() => setShowExerciseInfo(false)}
+              >
+                <Ionicons name="close" size={22} color="#888888" />
+              </Pressable>
+            </View>
+            <Text style={styles.guideExerciseName}>
+              {exerciseData?.name || currentExercise.exerciseId}
+            </Text>
+            <Text style={styles.guideLabel}>TARGET MUSCLE</Text>
+            <Text style={styles.guideText}>
+              {exerciseData
+                ? `${exerciseData.majorMuscle} — ${exerciseData.targetArea}`
+                : 'Target information is unavailable.'}
+            </Text>
+            {exerciseData?.minorMuscles?.length > 0 && (
+              <>
+                <Text style={styles.guideLabel}>SECONDARY MUSCLES</Text>
+                <Text style={styles.guideText}>
+                  {exerciseData.minorMuscles.join(', ')}
+                </Text>
+              </>
+            )}
+            <Text style={styles.guideLabel}>HOW TO DO IT</Text>
+            <Text style={styles.guideText}>
+              {exerciseData?.description || 'Instructions are unavailable for this exercise.'}
+            </Text>
+            <Text style={styles.guideText}>
+              Set up the {exerciseData?.equipment?.toLowerCase() || 'equipment'} securely, use a controlled full range of motion, and keep the target muscle under tension. Stop if you feel sharp pain.
+            </Text>
+            <Pressable style={styles.videoButton} onPress={openExerciseVideo}>
+              <Ionicons name="logo-youtube" size={18} color="#FFFFFF" />
+              <Text style={styles.videoButtonText}>WATCH PROPER FORM VIDEO</Text>
+            </Pressable>
+            <Pressable
+              style={styles.closeGuideButton}
+              onPress={() => setShowExerciseInfo(false)}
+            >
+              <Text style={styles.closeGuideText}>CLOSE</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* NAVIGATION */}
 
       <View style={styles.navigation}>
@@ -680,13 +1024,6 @@ export default function ActiveWorkoutScreen() {
         >
           <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
           <Text style={styles.navText}>PREVIOUS</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.navButton}
-          onPress={skipExercise}
-        >
-          <Text style={styles.skipText}>SKIP</Text>
         </Pressable>
 
         <Pressable
@@ -730,6 +1067,13 @@ function SetRow({
   setData,
   disabled,
   onDone,
+  onEdit,
+  onDelete,
+  isEditing,
+  dragState,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
 }) {
   const [weight, setWeight] = useState(
     setData?.weight ? String(setData.weight) : ''
@@ -740,6 +1084,108 @@ function SetRow({
   );
 
   const done = setData?.completed;
+  const [isDragging, setIsDragging] = useState(false);
+  const latestDragValues = useRef({});
+  const scale = useRef(new Animated.Value(1)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const previewY = useRef(new Animated.Value(0)).current;
+  const previewOffset =
+    dragState && dragState.setId !== setData.id
+      ? dragState.fromIndex < dragState.toIndex &&
+        index > dragState.fromIndex &&
+        index <= dragState.toIndex
+        ? -70
+        : dragState.toIndex < dragState.fromIndex &&
+          index >= dragState.toIndex &&
+          index < dragState.fromIndex
+          ? 70
+          : 0
+      : 0;
+
+  useEffect(() => {
+    Animated.spring(previewY, {
+      toValue: previewOffset,
+      useNativeDriver: true,
+    }).start();
+  }, [previewOffset, previewY]);
+
+  latestDragValues.current = {
+    disabled,
+    isEditing,
+    setId: setData.id,
+    index,
+    dragState,
+    onDragStart,
+    onDragMove,
+    onDragEnd,
+  };
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () =>
+        latestDragValues.current.isEditing && !latestDragValues.current.disabled,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        latestDragValues.current.isEditing &&
+        !latestDragValues.current.disabled &&
+        Math.abs(gesture.dy) > 4,
+      onPanResponderGrant: () => {
+        dragY.setValue(0);
+        setIsDragging(true);
+        latestDragValues.current.onDragStart(
+          latestDragValues.current.setId,
+          latestDragValues.current.index
+        );
+        Animated.spring(scale, {
+          toValue: 1.03,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderMove: (_, gesture) => {
+        dragY.setValue(gesture.dy);
+        latestDragValues.current.onDragMove(
+          latestDragValues.current.setId,
+          latestDragValues.current.index,
+          gesture.dy
+        );
+      },
+      onPanResponderRelease: (_, gesture) => {
+        setIsDragging(false);
+        const current = latestDragValues.current;
+        const targetIndex =
+          current.dragState?.setId === current.setId
+            ? current.dragState.toIndex
+            : current.index + Math.round(gesture.dy / 70);
+        latestDragValues.current.onDragEnd(
+          current.setId,
+          current.index,
+          targetIndex
+        );
+        Animated.spring(dragY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        setIsDragging(false);
+        latestDragValues.current.onDragEnd(
+          latestDragValues.current.setId,
+          latestDragValues.current.index,
+          latestDragValues.current.index
+        );
+        Animated.spring(dragY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
 
   /*
     Sync local state when setData changes externally
@@ -755,7 +1201,13 @@ function SetRow({
   }
 
   return (
-    <View style={styles.setRow}>
+    <Animated.View
+      style={[
+        styles.setRow,
+        isDragging && styles.draggingSet,
+        { transform: [{ translateY: isDragging ? dragY : previewY }, { scale }] },
+      ]}
+    >
       <View style={styles.setNumber}>
         <Text style={styles.setNumberText}>
           {index + 1}
@@ -764,10 +1216,10 @@ function SetRow({
 
       <View style={styles.setType}>
         <Text style={styles.setTypeText}>
-          {done
-            ? '✓'
-            : setData?.setType === 'warmup'
-              ? 'W'
+          {setData?.setType === 'warmup'
+            ? 'W'
+            : setData?.setType === 'drop'
+              ? 'D'
               : 'N'}
         </Text>
       </View>
@@ -804,30 +1256,44 @@ function SetRow({
         />
       </View>
 
-      <Pressable
-        style={[
-          styles.doneButton,
-          done && styles.doneActive,
-        ]}
-        disabled={disabled || done}
-        onPress={() =>
-          onDone(
-            index,
-            weight,
-            reps
-          )
-        }
-      >
-        <Text
-          style={[
-            styles.doneText,
-            done && styles.doneActiveText,
-          ]}
-        >
-          {done ? '✓' : 'DONE'}
-        </Text>
-      </Pressable>
-    </View>
+      <View style={styles.setActions}>
+        {isEditing ? (
+          <>
+            <View
+              style={[styles.setActionButton, styles.dragHandle, disabled && styles.actionDisabled]}
+              {...panResponder.panHandlers}
+            >
+              <Ionicons name="reorder-three" size={22} color="#777777" />
+            </View>
+            <Pressable
+              style={[styles.deleteSetButton, disabled && styles.actionDisabled]}
+              disabled={disabled}
+              accessibilityLabel="Delete set"
+              onPress={() => onDelete(setData.id)}
+            >
+              <Ionicons name="trash-outline" size={17} color="#FFFFFF" />
+            </Pressable>
+          </>
+        ) : done ? (
+          <Pressable
+            style={[styles.setActionButton, disabled && styles.actionDisabled]}
+            disabled={disabled}
+            accessibilityLabel="Edit completed set"
+            onPress={() => onEdit(index)}
+          >
+            <Ionicons name="pencil" size={15} color="#000000" />
+          </Pressable>
+        ) : (
+          <Pressable
+            style={[styles.doneButton, styles.setActionButton]}
+            disabled={disabled}
+            onPress={() => onDone(index, weight, reps)}
+          >
+            <Text style={styles.doneText}>DONE</Text>
+          </Pressable>
+        )}
+      </View>
+    </Animated.View>
   );
 }
 
@@ -961,6 +1427,23 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     marginTop: 6,
+    flex: 1,
+  },
+
+  exerciseNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  infoButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
   },
 
   target: {
@@ -1044,7 +1527,39 @@ const styles = StyleSheet.create({
     color: '#666666',
     fontSize: 11,
     fontWeight: '800',
+  },
+
+  setsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 10,
+  },
+
+  setsEditButton: {
+    alignItems: 'center',
+    borderColor: '#333333',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+
+  setsEditButtonActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+
+  setsEditText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+
+  setsEditTextActive: {
+    color: '#000000',
   },
 
   setRow: {
@@ -1056,6 +1571,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#252525',
+  },
+
+  draggingSet: {
+    borderColor: '#FFFFFF',
+    elevation: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    zIndex: 10,
   },
 
   setNumber: {
@@ -1111,14 +1636,8 @@ const styles = StyleSheet.create({
 
   doneButton: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 11,
-    marginLeft: 5,
-  },
-
-  doneActive: {
-    backgroundColor: '#252525',
+    margin: 0,
+    padding: 0,
   },
 
   doneText: {
@@ -1127,8 +1646,45 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  doneActiveText: {
-    color: '#FFFFFF',
+  setActions: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 39,
+    marginLeft: 5,
+    gap: 5,
+  },
+
+  dragHandle: {
+    backgroundColor: '#252525',
+  },
+
+  setActionButton: {
+    alignSelf: 'center',
+    margin: 0,
+    padding: 0,
+    width: 48,
+    height: 39,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  actionDisabled: {
+    opacity: 0.3,
+  },
+
+  deleteSetButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#402020',
+    borderColor: '#703030',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 39,
+    justifyContent: 'center',
+    width: 36,
   },
 
   extraButton: {
@@ -1222,6 +1778,59 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  guideExerciseName: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 18,
+  },
+
+  guideLabel: {
+    color: '#666666',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    marginTop: 12,
+  },
+
+  guideText: {
+    color: '#CCCCCC',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+  },
+
+  videoButton: {
+    alignItems: 'center',
+    backgroundColor: '#CC0000',
+    borderRadius: 10,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    marginTop: 20,
+    paddingVertical: 13,
+  },
+
+  videoButtonText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  closeGuideButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    marginTop: 22,
+    paddingVertical: 13,
+  },
+
+  closeGuideText: {
+    color: '#000000',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
   navigation: {
     flexDirection: 'row',
     gap: 8,
@@ -1244,12 +1853,6 @@ const styles = StyleSheet.create({
 
   navText: {
     color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-
-  skipText: {
-    color: '#888888',
     fontSize: 10,
     fontWeight: '700',
   },

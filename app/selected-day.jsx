@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { recommendedWorkouts, alternativeMap } from '../utils/workout';
 import { exercises } from '../utils/exercises';
 import { getData, saveData, removeData } from '../utils/storage';
+import { localTimestamp } from '../utils/date-time';
 
 export default function SelectedDayScreen() {
   const { workoutId, day, workoutName, splitId } = useLocalSearchParams();
@@ -79,6 +80,18 @@ export default function SelectedDayScreen() {
     setShowAlternatives(false);
     setSelectedExercise(null);
     setAlternatives([]);
+  };
+
+  const startWorkout = async () => {
+    if (!workout) return;
+
+    const startedAt = localTimestamp();
+    await removeData('activeWorkoutSession');
+
+    router.push({
+      pathname: '/active-workout',
+      params: { workoutId, startedAt },
+    });
   };
 
   if (!workoutId) {
@@ -161,12 +174,7 @@ export default function SelectedDayScreen() {
 
         <Pressable
           style={styles.startButton}
-          onPress={() =>
-            router.push({
-              pathname: '/active-workout',
-              params: { workoutId },
-            })
-          }
+          onPress={startWorkout}
         >
           <Ionicons name="play" size={16} color="#000000" />
           <Text style={styles.startText}>START WORKOUT</Text>
